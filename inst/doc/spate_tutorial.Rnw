@@ -1,0 +1,1087 @@
+\documentclass[11pt,pdftex,a4paper]{article}
+\usepackage{amsmath, amssymb, amsfonts, verbatim, graphicx, Sweave, eurosym, a4, natbib}
+\newcommand{\mat}[1]{{\boldsymbol #1}}
+\newcommand{\vect}[1]{{\boldsymbol #1}}
+\newcommand{\func}[1]{{\tt#1\rm}}
+\newcommand{\code}[1]{{\tt#1\rm}}
+\newcommand{\pkg}[1]{{\tt#1\rm}}
+\newcommand{\expo}[1]{{ e^{#1}}}
+%\VignetteIndexEntry{spate Tutorial}
+
+% aspell("spate_tutorial.Rnw", filter="Sweave",control="--mode=tex --lang=en")
+
+\SweaveOpts{engine=R, eps=FALSE, pdf=TRUE, width=5.33, height=3}
+\SweaveOpts{strip.white=true,keep.source=TRUE}
+\setkeys{Gin}{width=\textwidth} 
+
+<<label=load,echo=FALSE>>=
+## path="/u/sigrist/R/Precipitation/SPDEFreq/"
+## require(spate,"/u/sigrist/R/Precipitation/SPDEFreq/install")
+require(spate)
+# require(colorspace)
+# cols=function() return(colscale=diverge_hcl(n, c = c(100, 0), l = c(50, 90), power = 1.3))
+@ 
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \title{\func{spate}: an R Package for Statistical Modeling with SPDE Based Spatio-Temporal Gaussian Processes} 
+    \author{Fabio Sigrist, Hans R. K\"unsch, Werner A. Stahel\\ Seminar for
+  Statistics, Department of Mathematics, ETH Z\"urich\\ 8092 Z\"urich, Switzerland}
+
+\maketitle
+
+\begin{abstract}
+  The R package \pkg{spate} provides tools for modeling of large space-time data sets. A
+spatio-temporal Gaussian process is defined through a stochastic partial
+differential equation (SPDE) which is solved using spectral methods. In
+contrast to the traditional Geostatistical way of relying on the covariance
+function, the spectral SPDE approach is computationally tractable and
+provides a realistic space-time parametrization.
+
+
+This package aims at providing tools for two different
+modeling approaches. First, the SPDE based spatio-temporal model can be
+used as a component in a customized hierarchical Bayesian model (HBM) or
+generlized linear mixed model (GLMM). The functions of
+the package then provide parametrizations of the process part of the model
+as well as computationally efficient algorithms needed for doing inference
+with the hierarchical model. Alternatively, the adaptive
+MCMC algorithm implemented in the package can be used as an algorithm for
+doing inference without any additional modeling. The
+MCMC algorithm supports data that follow a Gaussian
+or a censored distribution with point mass at zero. Spatio-temporal covariates can be included in the model through a regression term.
+
+  \end{abstract}
+
+\clearpage
+
+\tableofcontents
+
+\clearpage
+
+\section{Introduction}
+Increasingly larger spatio-temporal data arise in many fields and
+applications. For instance, data sets are obtained from remote
+sensing satellites or deterministic physical models such as numerical
+weather prediction (NWP) models. Hence, there is a growing need for
+methodology that can cope with such large data. See \citet{CrWi11} for an
+introduction and an overview of spatio-temporal statistics. 
+
+
+Gaussian processes are often used for modeling data in space
+and time. A Gaussian process is defined by specifying a mean and a
+covariance function. However, directly
+working with a spatio-temporal covariance function is computationally infeasible if data sets
+are large. This is due to the fact that for doing inference, frequentist or Bayesian, covariance matrices need to be
+factorized which is computationally expensive. Alternatively, a Gaussian
+process can be specified through a stochastic partial differential equation
+(SPDE), which implicitly also gives a covariance function. The
+advection-diffusion SPDE is an elementary model in the spatio-temporal
+setting. When solving this SPDE in the spectral space, and discretizing in time and space, a linear Gaussian state space model
+is obtained which is computationally advantageous (see \citet{SiKuSt12}). Roughly speaking, the
+computational speed-up is due to the temporal Markov property and the fact
+that Fourier functions are eigenfunctions of the differential operator,
+from which follows that in the spectral space most of the relevant matrices
+are diagonal. This package implements the methodology presented in \citet{SiKuSt12}.
+
+The package \pkg{spate} has the following functionality. On the one hand, it provides tools for
+constructing customized models such as generalized linear mixed models
+(GLMM) or hierarchical Bayesian models (HBM) \citep{WiBeCr98}
+using a spatio-temporal Gaussian process at some stage, for instance, in
+the linear predictor. These tools include functions for obtaining
+spectral propagator and covariance matrices of the linear Gaussian state
+space model, fast calculation of the two-dimensional real Fourier
+transform, reduced dimensional approximations, fast evaluation of the log-likelihood, and fast simulation from
+the full conditional of the Fourier coefficients using a spectral variant of the
+Forward Filtering Backward Sampling algorithm. On the other hand, the
+package also provides a function for Bayesian inference
+using a Monte Carlo Markov chain (MCMC) algorithm that is designed such
+that it needs as little fine tuning as possible. The MCMC algorithm can
+model data being normally distributed or censored data with point mass at
+zero following a skewed Tobit distribution. There is also a function for making probabilistic
+predictions. A user interested in modeling data not
+following one of the above two types of data distributions can modify the
+MCMC algorithm to allow for different distributions. Finally, functions for plotting and simulation of space-time processes are also provided.
+
+\subsection{Notation}
+Since some readers might skip the next section, we start by establishing
+the principal notation. The Gaussian process modeling
+structured variation in space and time is denoted by $\xi(t_i,\vect{s}_l)$, $i=1,\dots,T$,
+$l=1,\dots,N$. In vectorized form, we write $\vect
+\xi(t_i)=(\xi(t_i,\vect{s}_1),\dots,\xi(t_i,\vect{s}_{N}))'$ (where stacking is done first over the x-axis and then over the y-axis), and $\vect
+\xi=(\vect \xi(t_1)',\dots,\vect \xi(t_T)')'$. For each $t_i$, $\vect
+\xi(t_i)=\mat \Phi \vect \alpha(t_i) $ is the Fourier transform of the
+Fourier coefficients $\vect \alpha(t_i)$, $\vect \alpha=(\vect
+\alpha(t_1)',\dots,\vect \alpha(t_T)')'$. The observed Gaussian process
+$w(t_i,\vect{s}_l)$ equals the latent $\xi(t_i,\vect{s}_l)$ plus a measurement error. $\vect w(t_i)$ and $\vect w$ are defined
+analogously. If the observations are censored, i.e., if they follow a skewed Tobit distribution, the
+observed data is denoted by $y(t_i,\vect{s}_l)$. Finally,
+$\vect \theta=(\rho_0,\sigma^2,\zeta,\rho_1,\gamma,\alpha,\mu_x,\mu_y,\tau^2)'$
+denotes the vector of hyper-parameters.
+
+We assume that we model the process on a
+regular, rectangular grid of $n \times n =N$ spatial locations
+$\vect{s}_1,\dots,\vect{s}_N$ in $[0,1]^2$ and at equidistant time points
+$t_1,\dots,t_T$ with $t_i-t_{i-1}=\Delta$. These two assumptions
+can be easily relaxed, i.e., one can have irregular spatial locations and
+non-equidistant time points. The former can be achieved by adopting a data
+augmentation approach (implemented in \code{spate.mcmc}) or by using an
+incidence matrix (also implemented in \code{spate.mcmc}, see below) depending on the
+dimensionality of the observation process. The latter can be done by taking
+a time varying $\Delta_i$.
+
+
+\section{Summary of modeling background}\label{background}
+In the following, we briefly recall the underlying model and methodology. For more details we refer to \cite{SiKuSt12}. 
+\subsection{Space-time Gaussian process defined through an SPDE}
+A spatio-temporal Gaussian process $\xi(t,\vect{s})$ is defined as the
+solution of the stochastic advection-diffusion equation
+\begin{equation}\label{SPDE}
+\frac{\partial}{\partial  t}\xi(t,\vect{s})=-\vect{\mu}\cdot\nabla
+\xi(t,\vect{s})+\nabla\cdot\mat{\Sigma}\nabla\xi(t,\vect{s})-\zeta \xi(t,\vect{s})+\epsilon(t,\vect{s}),
+\end{equation}
+where $t \geq 0$, $\vect s \in [0,1]^2$ wrapped on a torus,  $\nabla =\left(\frac{\partial }{\partial x},\frac{\partial }{\partial
+    y}\right)'$ is the gradient operator, and $\nabla\cdot
+\vect{F}=\frac{\partial F^x}{\partial x}+\frac{\partial F^y}{\partial y}$ is
+the divergence operator for $\vect{F}=(F^x,F^y)'$ being a vector field, $\vect \mu =(\mu_x,\mu_y)'$,
+\begin{equation*}
+\mat{\Sigma}^{-1}=\frac{1}{\rho_1^2}\left(\begin{matrix}\cos{\alpha} &
+    \sin{\alpha}\\ -\gamma\cdot\sin{\alpha} & \gamma\cdot\cos{\alpha}\end{matrix}\right)^{T}\left(\begin{matrix}\cos{\alpha} &
+    \sin{\alpha}\\ -\gamma\cdot\sin{\alpha} & \gamma\cdot\cos{\alpha}\end{matrix}\right),
+\end{equation*}
+and where $\epsilon(t,\vect{s})$ is a Gaussian random field that is white in
+time and has a spatial Mat\'ern covariance function with spectral density
+\begin{equation*}
+ \widehat{f}(\vect{k})=\frac{\sigma^2}{(2\pi)^2}\left(\vect{k}\vect{k}+\frac{1}{\rho_0^2}\right)^{-(\nu+1)}.
+\end{equation*} 
+For the parameters, we have the following restrictions
+\begin{equation*}
+  \rho_0, \sigma, \rho_1, \gamma, \zeta \geq 0, ~~ \mu_x,\mu_y \in
+  [-0.5,0.5],~~\alpha \in [0,\pi/2].
+  \end{equation*}
+ The parameters are interpreted as follows. The first term $\vect{\mu}\cdot\nabla
+\xi(t,\vect{s})$ models transport effects (called advection in weather applications), $\vect{\mu}$ being a drift or velocity vector. The second term, $\nabla\cdot\mat{\Sigma}\nabla\xi(t,\vect{s})$, is a
+diffusion term that can incorporate anisotropy. $\rho_1$ acts as a range
+parameter and controls the amount of diffusion. The parameters $\gamma$ and
+$\alpha$ control the amount and the direction of anisotropy. With
+$\gamma=1$, isotropic diffusion is obtained. Removing a certain amount of
+$\xi(t,\vect{s})$ at each time,  $-\zeta \xi(t,\vect{s})$
+accounts for damping and regulates the amount of temporal correlation. Finally, $\epsilon(t,\vect{s})$ is a source-sink or stochastic forcing
+term that can be interpreted as describing, amongst others, convective
+phenomena in precipitation modeling applications. $\rho_0$ is a range
+parameter and $\sigma^2$ determines the marginal variance. Since in many applications the
+smoothness parameter $\nu$ is not estimable from data, we take
+$\nu=1$ by default, which corresponds to the Whittle covariance
+ function.
+
+\subsection{Spectral solution}
+As is shown in  \cite{SiKuSt12}, inference can be done
+computationally efficiently when solving the SPDE in the spectral
+space. The latter means, roughly speaking, that the solution is represented
+a linear combination of deterministic, real Fourier basis
+functions 
+\begin{equation*}\phi^{(c)}_j(\vect{s})=\cos(\vect{k}_j'\vect{s}),~~\phi^{(s)}_j(\vect{s})=\sin(\vect{k}_j'\vect{s}),
+\end{equation*} 
+with random coefficients $\alpha^{c}_j(t)$, $\alpha^{s}_j(t)$ that evolve dynamically over time
+  according to a vector autoregression. Fourier functions have several advantages for
+solving the SPDE \eqref{SPDE}. Amongst others, Fourier functions are
+eigenfunctions of the spatial differential operator: differentiation in the
+physical space corresponds to multiplication in the spectral
+space. Furthermore, one can use the FFT for efficiently transforming from the physical to the spectral space, and vice versa.
+
+As is customary for spatial and spatio-temporal models, we add an
+non-structured Gaussian term $\nu(t,\vect s) \sim N(0,\tau^2)$ that is white
+in time and space to $\xi(t,\vect{s})$. This term accounts for small scale variation and / or
+measurement errors (nugget effect). Solving the SPDE in the spectral space
+and discretizing in time and space, we obtain the following linear Gaussian state space model:
+\begin{align}\label{GausObs}
+\vect{w}(t_{i+1})&=\vect{\xi}(t_{i+1})+\vect\nu(t_{i+1}), \vect \nu(t_{i+1})\sim
+N(0,\tau^2 \mat 1),\\
+\label{SolFTVec}
+\vect{\xi}(t_{i+1})&=\mat{\Phi}\vect{\alpha}(t_{i+1}),\\
+\vect{\alpha}(t_{i+1})&=\mat{G}\vect{\alpha}(t_i)+\widehat{\vect{\epsilon}}(t_{i+1}),~~\widehat{\vect{\epsilon}}(t_{i+1})\sim
+N(0,\widehat{\mat{Q}}).\label{SolCoef}
+\end{align}
+The observation equation \eqref{GausObs} specifies how the observation
+field $\vect{w}(t_{i+1})=(w(t_i,\vect{s}_1),\dots,w(t_i,\vect{s}_N))'$ at
+time $t_{i+1}$ is related to the spatio-temporal process
+$\vect{\xi}(t_{i+1})$. See below on how to handle non-Gaussian data. In the second equation 
+\eqref{SolFTVec}, the matrix $\mat{\Phi}$,
+\begin{equation*}
+\begin{split}
+\mat{\Phi}=\Big[&\vect{\phi}(\vect{s}_1),\dots,\vect{\phi}(\vect{s}_N)\Big]'\\
+ \vect{\phi}(\vect{s}_l)=\Big(&\phi_1^{(c)}(\vect{s}_l),\dots,\phi_4^{(c)}(\vect{s}_l),\phi_5^{(c)}(\vect{s}_l),\phi_5^{(s)}(\vect{s}_l),\dots,\phi_{(K-4)/2}^{(c)}(\vect{s}_l),\phi_{(K-4)/2}^{(s)}(\vect{s}_l)\Big)',\\
+\end{split} 
+\end{equation*}
+applies the discrete, real Fourier transformation to the coefficients
+\begin{equation*}
+\begin{split}
+\vect{\alpha}(t)=\Big(&\alpha_1^{(c)}(t),\dots,\alpha_4^{(c)}(t),\alpha_5^{(c)}(t),\alpha_5^{(s)}(t),\dots, \alpha_{(K-4)/2}^{(c)}(t),\alpha_{(K-4)/2}^{(s)}(t)\Big)'.
+\end{split} 
+\end{equation*}
+Note that the first four terms are cosine terms and, afterwards, there are
+cosine - sine pairs. This is a peculiarity of the real Fourier
+transform. It is due to the fact that for four wavenumbers $\vect k_j$, the
+sine terms equal zero on the grid (see Figure \ref{fig:WaveNumbers}). We use the real Fourier transform, instead of the complex one, in
+order to avoid complex numbers in the propagator matrix $\mat G$ and since
+data is usually real. Note that due to the use of Fourier functions, we assume
+spatial stationarity for both the solution $\xi$ and the innovation term $\epsilon$. 
+
+The third equation \eqref{SolCoef} specifies how the random Fourier coefficients
+evolve dynamically over time. The propagator matrix $\mat{G}$ is a block
+diagonal matrix with $2 \times 2$ blocks, and the innovation covariance
+matrix 
+$\widehat{\mat{Q}}$ is a diagonal matrix. These two matrices are defined
+as follows:
+ \begin{equation}\label{Propag}
+  \begin{split}
+  \mat G &= \expo{\Delta \mat H},\\
+  [\mat H]_{1:4,1:4}&=\text{diag}\left( -\vect{k}_j'\mat{\Sigma}\vect{k}_j
+    - \zeta\right),\\
+  [\mat H]_{5:K,5:K}&=\text{diag}\left(\begin{matrix}
+      -\vect{k}_j'\mat{\Sigma}\vect{k}_j - \zeta&-\vect{\mu}\vect{k}_j
+      \\\vect{\mu}\vect{k}_j  &-\vect{k}_j'\mat{\Sigma}\vect{k}_j -\zeta \end{matrix}\right),
+\end{split}
+\end{equation}
+and  \begin{equation}\label{InnovSpec}
+    \widehat{\mat{Q}}=\text{\textnormal{diag}}\left(\widehat{f}(\vect{k}_j)\frac{1-\expo{-2\Delta(\vect{k}_j'\mat{\Sigma}\vect{k}_j+ \zeta)}}{2(\vect{k}_j'\mat{\Sigma}\vect{k}_j +\zeta)}\right).
+    \end{equation}
+Figure \ref{fig:Propagator} shows an example of a propagator matrix $\mat
+G$.
+
+The above result is given in vector format. For the sake of understanding,
+we can also write that the solution is of the form
+\begin{equation}\label{SolFT}
+  \begin{split}
+\xi(t,\vect{s}_l) =&
+\sum_{l=1}^{4}\alpha^{(c)}_j(t)\phi^{(c)}_j(\vect{s}_l)\\
+&+\sum_{l=5}^{K/2 +2}{\alpha^{(c)}_j(t)\phi^{(c)}_j(\vect{s}_l)+\alpha^{(s)}_j(t)\phi^{(s)}_j(\vect{s}_l)}\\
+=&\vect{\phi}(\vect{s}_l)'\vect{\alpha}(t),
+\end{split} 
+\end{equation}
+where $K$ denotes the number of Fourier terms, i.e., $K=N$. $K$ however
+does not necessary need to equal $N$, see below for a discussion on
+dimension reduction. 
+
+
+
+The spatial wavenumbers $\vect k_j$ used in the real Fourier transform lie on the $n\times n$ grid $D_n=\{ 2\pi\cdot(i,j): -(n/2+1)\leq i,j \leq
+n/2\} \subset 2\pi\cdot \mathbb{Z}^2$ with $n^2 = N$. Figure \ref{fig:WaveNumbers} illustrates the spatial
+wavenumbers on a $20\times 20$ grid. The red crosses mark the first four
+spatial wavenumbers having only a cosine term. The remaining dots with a circle
+around represent the wavenumbers used by the cosine - sine pairs in the
+real Fourier transform.
+\setkeys{Gin}{width=0.65\textwidth} 
+\begin{figure}[!h]
+  \centering
+<<label=WaveNumbers,fig=TRUE,echo=FALSE,width=5,height=5>>=
+Allx <- rep((-20/2+1):(20/2),20)
+Ally <- as.vector(apply(matrix((-20/2+1):(20/2)),1,rep,times=20))
+wavenumbers <- t(wave.numbers(20)[["wave"]])/2/pi
+par(mar=c(4,4,3,1))
+plot(Allx,Ally,pch=".",cex=4,main="Spatial wavenumbers",
+     xlab="kx/2pi",ylab="ky/2pi",xaxt='n',yaxt='n')
+axis(1, at = c(-5,0,5,10), labels = paste("", c(-5,0,5,10),sep=""))
+axis(2, at = c(-5,0,5,10), labels = paste("", c(-5,0,5,10),sep=""))
+points(wavenumbers[1:4,],lwd=2,col="red",pch=4,cex=2)
+points(wavenumbers,cex=2)
+@
+\caption{Illustration of wavenumbers used in the two-dimensional discrete real Fourier transform with $n^2=400$ grid points.} 
+\label{fig:WaveNumbers}
+\end{figure}
+
+To get an idea how the basis functions $\cos{(\vect{k}_j'\vect{s})}$ and
+$\sin{(\vect{k}_j'\vect{s})}$ look like, we plot in Figure
+\ref{fig:FourierBasis} twelve low-frequency basis functions corresponding to the
+six spatial frequencies closest to the origin $\vect 0$ (see Figure
+\ref{fig:WaveNumbers}).
+\setkeys{Gin}{width=\textwidth} 
+\begin{figure}[!h]
+  \centering
+\includegraphics{spate_tutorial-FourierBasis2}
+\caption{Illustration of two dimensional Fourier basis functions used in
+  the discrete real Fourier transform. On the x- and y-axis are the coordinates of $\vect{s}=(s_x,s_y)'$.} 
+\label{fig:FourierBasis}
+\end{figure}
+
+
+
+\subsection{Non-Gaussian data, covariates, and missing data}
+Spatio-temporal covariates $x_p(t_i,\vect{s}_l)$, $p=1,\dots,P$ can easily be included in the model by adding a regression term to the equation \eqref{GausObs}:
+\begin{equation}
+w(t_i,\vect{s}_l)=\sum_{p=1}^P{ \beta_p\cdot x_p(t_i,\vect{s}_l)} + \xi(t_{i+1},\vect{s}_l)+\nu(t_{i+1},\vect{s}_l).
+\end{equation}
+
+Non-Gaussian data can be modeled, for instance, in the framework of
+generalized linear mixed models (GLMM) or hierarchical Bayesian models. This means that one assumes that
+the data follow a non-Gaussian distribution $\mathcal{F}$ conditionally on
+$w(t_i,\vect{s}_l)$ or conditionally on the linear predictor $\sum_{p=1}^P{ \beta_p\cdot
+  x_p(t_i,\vect{s}_l)} + \xi(t_{i+1},\vect{s}_l)$. Note that fitting such
+models is a non-trivial task and subject to ongoing research.
+
+Another approach, which avoids adding an additional stochastic level, is to assume that the data is a transformed version of
+$w(t_i,\vect{s}_l)$. For instance, if the observations follow a skewed Tobit model, then the we have the following observation relation
+\begin{equation}\label{Tobit}
+  y(t_i,\vect{s}_l)=\max(0,w(t_i,\vect{s}_l))^{\lambda},
+\end{equation}
+where now $y(t_i,\vect{s}_l)$ denotes the observed values and
+$w(t_i,\vect{s}_l)$ is a latent Gaussian field. This data model is
+implemented in the package \pkg{spate}. Such a model is often used for
+modeling precipitation.
+
+Furthermore, missing values, and the censored ones in \eqref{Tobit}, can be easily dealt with using a data augmentation
+approach. See, e.g., \citet{SiKuSt11} for more details. In particular, if
+the observations do not lie on a regular spatial grid, the grid cells where
+no observations are made can be assumed to have missing data.
+
+\subsection{Computationally efficient frequentist and Bayesian inference}
+When doing inference, for both data models, the Gaussian one in \eqref{GausObs} and the
+transformed Tobit model \eqref{Tobit}, the main difficulty consists in
+evaluating the likelihood $\ell(\vect \theta)=P[\vect \theta|\vect w]$,
+$\vect
+\theta=(\rho_0,\sigma^2,\zeta,\rho_1,\gamma,\alpha,\mu_x,\mu_y,\tau^2)'$,
+and in simulating from the full conditional of the coefficients
+$[\vect \alpha|\vect w, \vect \theta]$, where $\vect w$ and $\vect \alpha$
+denote the full space-time fields. As shown in \cite{SiKuSt12}, this can
+be done in $O(TN)$ time in the spectral space using the Kalman filter and a
+backward sampling step. The fast Fourier transform (FFT) can be used to
+transform between the physical and the spectral space. Since there are
+$T$ fields of dimension $N$ ($=n^2$), the costs for this are $O(TN\log N)$.
+
+\subsection{Dimension reduction}
+The total computational costs can be additionally alleviated by
+using a reduced dimensional Fourier basis with $K<<N$ basis functions. This means that one includes only
+certain frequencies, e.g., low ones. The spectral filtering and
+sampling algorithms then require $O(KT)$ operations. For using the FFT, the
+frequencies being excluded are just set to zero. 
+
+Alternatively, when the observation
+process is irregular and low-dimensional in space, one can
+include an incidence matrix $\mat I$ that relates the process on the grid to the
+observation locations. Instead of \eqref{GausObs}, the observation equation is then
+\begin{equation}\label{Incidence}
+\vect{w}(t_{i+1})=\mat I \mat{\Phi}\vect{\alpha}(t_{i+1})+\vect
+ \nu(t_{i+1}),~~ \vect \nu(t_{i+1})\sim N(0,\tau^2 \mat 1_K).
+\end{equation}
+The FFT cannot be used anymore, and the total computational costs are $O(K^3T)$ due to the traditional FFBS.
+
+
+\section{Parametrization of the dynamic space-time model}\label{parametrization}
+\subsection{Innovation spectrum $\widehat{\mat{Q}}$ and Mat\'ern spectrum}  
+ The function \code{innov.spec} returns the spectrum $\widehat{\mat{Q}}$ of the integrated stochastic innovation
+     field $\widehat{\vect{\epsilon}}(t_{i+1})$ as specified in
+     \eqref{InnovSpec}. Similarly, the function \code{matern.spec} returns the spectrum of the Mat\'ern covariance
+ function. Note that the Mat\'ern spectrum is renormalized, by dividing with the sum
+ over all frequencies so that they sum to one. This guarantees that the parameter $\sigma^2$ is the marginal
+ variance no matter how many wavenumbers are included, in case dimension
+ reduction is done and some frequencies are set to zero. 
+ 
+ The code below illustrates how these functions are used. First a vector of independent Gaussian
+ random variables with variances according to the desired spectrum is
+ simulated. For instance, $\widehat{\vect{\epsilon}}\sim
+ N(0,\widehat{\mat{Q}})$. In the example, this is done for the Whittle and
+ the integrated innovation spectrum specified in \eqref{InnovSpec}.
+ Then its Fourier transform $\mat \Phi \widehat{\vect{\epsilon}}$ is
+ calculated to obtain a sample from the spatial field with corresponding
+ spectrum. See two sections below for more details on how to calculate the Fourier transform. Figure \ref{fig:SpecSim} shows sample fields from the Whittle process and
+ from the stochastic innovation process.
+ 
+<<label=SpecSim1,fig=FALSE,echo=TRUE,width=7,height=3.5>>=
+n <- 100
+set.seed(1)
+## Simulate Matern field
+matern.spec <- matern.spec(wave=spate.init(n=n,T=1)[["wave"]],
+                           n=n,rho0=0.05,sigma2=1,norm=TRUE)
+matern.sim <- real.fft(sqrt(matern.spec)*rnorm(n*n),n=n,inv=FALSE)
+## Simulate stochstic innovation field epsilon
+innov.spec <- innov.spec(wave=spate.init(n=n,T=1)[["wave"]],
+                         n=n, rho0=0.05, sigma2=1, zeta=0.5,
+                         rho1=0.05, alpha=pi/4, gamma=2,norm=TRUE)
+innov.sim <- real.fft(sqrt(innov.spec)*rnorm(n*n),n=n,inv=FALSE)
+@
+
+ \begin{figure}[!h]
+   \centering
+<<label=SpecSim2,fig=TRUE,echo=FALSE,width=7,height=3.5>>=
+par(mfrow=c(1,2),mar=c(2,3,2,1))
+image(1:n,1:n,matrix(matern.sim,nrow=n),main="Whittle",
+      xlab="",ylab="",col=cols())
+image(1:n,1:n,matrix(innov.sim,nrow=n),main="Integrated innovation",
+      xlab="",ylab="",col=cols())
+@
+   \caption{Samples from Gaussian processes with Whittle covariance function
+     and the covariance function of the integrated stochastic innovation
+     field $\widehat{\vect{\epsilon}}(t_{i+1})$.} 
+ \label{fig:SpecSim}
+ \end{figure}
+ 
+
+
+
+
+ \subsection{Propagator matrix $\mat G$}
+  The function \func{get.propagator} returns the spectral propagator matrix $\mat G$
+ as defined in \eqref{Propag}. Figure \ref{fig:Propagator} shows an example
+ of a propagator matrix $\mat G$. The code before the figure illustrates how \func{get.propagator} is used. 
+  \setkeys{Gin}{width=0.65\textwidth} 
+<<label=Propagator,echo=TRUE,width=5,height=5>>=
+n <- 4
+wave <- wave.numbers(n)
+G <- get.propagator(wave=wave[["wave"]], indCos=wave[["indCos"]], zeta=0.5, 
+           rho1=0.1,gamma=2, alpha=pi/4, muX=0.2, muY=-0.15)
+@
+% The Matrix package is used since it plots matrices nicely
+% library(Matrix)
+% image(as(G, "sparseMatrix"),main="Propagator matrix G")
+\begin{figure}[!h]
+  \centering
+\includegraphics{spate_tutorial-Propagator}
+\caption{Illustration of propagator matrix $\mat G$.} 
+\label{fig:Propagator}
+\end{figure}
+
+Alternatively, the function \code{propagate.spectral} propagates a state $\vect{\alpha}(t)$ to obtain $\mat G
+ \vect{\alpha}(t)$ in a computationally efficient way using the
+ block-diagonal structure of $\mat G$. Note that this is a wrapper function
+ of a C function. In general, it is preferable to use
+ \code{propagate.spectral} instead of calculating a matrix multiplication
+ with $\mat G$. The function  \code{propagate.spectral} has as argument the propagator matrix $\mat G$ in
+ vectorized from as obtained from the function \code{get.propagator.vec}. Figure \ref{fig:Propagate} and the corresponding code
+ illustrates the use of these two functions. First, we define an initial
+ state $\vect \alpha(t)$, which is a sample from the process with the Whittle
+ covariance function in this example. Then $\vect \alpha(t)$ is propagated forward to
+ obtain $\mat G \vect \alpha(t)$. The
+ code shows that actually calculating $\mat G \vect \alpha(t)$ and
+ applying \code{propagate.spectral} are equivalent.
+ 
+<<label=Propagate1,echo=TRUE,width=7,height=3.5>>=
+n <- 50
+wave <- wave.numbers(n)
+spec <- matern.spec(wave=wave[["wave"]],n=n,
+                    rho0=0.05,sigma2=1,norm=TRUE)
+## Initial state
+alphat <- sqrt(spec)*rnorm(n*n)
+## Propagate state
+G <- get.propagator(wave=wave[["wave"]],indCos=wave[["indCos"]],zeta=0.1, 
+           rho1=0.02, gamma=2,alpha=pi/4,muX=0.2,muY=0.2,dt=1,ns=4)
+alphat1a <- as.vector(G%*%alphat)
+Gvec <- get.propagator.vec(wave=wave[["wave"]],indCos=wave[["indCos"]],zeta=0.1, 
+                  rho1=0.02, gamma=2,alpha=pi/4,muX=0.2,muY=0.2,dt=1,ns=4)
+alphat1b <- propagate.spectral(alphat,n=n,Gvec=Gvec)
+## Both methods do the same thing:
+sum(abs(alphat1a-alphat1b))
+@
+  \setkeys{Gin}{width=\textwidth} 
+\begin{figure}[!h]
+  \centering
+<<label=Propagate2,fig=TRUE,echo=FALSE,width=7,height=3.5>>=
+par(mfrow=c(1,2),mar=c(2,3,2,1))
+image(1:n,1:n,matrix(real.fft(alphat,n=n,inv=FALSE),nrow=n),
+      main="Whittle field",xlab="",ylab="",col=cols())
+image(1:n,1:n,matrix(real.fft(alphat1a,n=n,inv=FALSE),nrow=n),
+      main="Propagated field",xlab="",ylab="",col=cols())
+@
+\caption{Illustration of spectral propagation: initial and propagated field.} 
+\label{fig:Propagate}
+\end{figure}
+
+\subsection{Two-dimensional real Fourier transform}\label{fft}
+   The function \code{real.fft} calculates the fast two-dimensional real Fourier transform. This is a
+   wrapper function of a C function which uses the complex FFT function
+   from the \code{fftw3} library. Furthermore, the function \code{real.fft.TS} calculates
+   the two-dimensional real Fourier transform of a space-time field for all
+   time points at once. To be
+   more specific, for each time point, the corresponding spatial field is transformed. In contrast to using T times the function \code{real.FFT},
+  R needs to communicate with C only once which saves considerable
+  computational time, depending on the data size. For an example of the use
+  of \code{real.fft}, see two sections above.
+  
+  The function \code{wave.number} returns the wavenumbers used in the
+  real Fourier transform. In contrast to the complex Fourier transform, which
+  uses $n^2$ different wavenumbers $\vect k_j$ on a square grid, the real
+Fourier transform uses $n^2/2 +2$ different wavenumbers. As mentioned
+earlier, four of them have only a cosine term, and the remaining $n^2/2-2$
+wavenumbers each have a sine
+and cosine term. For technical details on
+the real Fourier transform, we refer to \citet{DuMe84},
+\citet{BoTaHa84}, \citet{RoWi05}, and \citet{Pa07}. 
+
+
+The function \code{get.real.dft.mat} returns the matrix $\mat \Phi$ (see
+\eqref{SolFTVec}) which applies the two-dimensional real Fourier transform. Note
+that, in general, it is a lot faster to use \code{real.fft} rather than actually multiplying with $\mat \Phi$. The following code shows how $\mat
+\Phi$ can be constructed using \code{get.real.dft.mat}. 
+<<label=FourierBasis1,echo=TRUE>>=
+n <- 20
+wave <- wave.numbers(n=n)
+Phi <- get.real.dft.mat(wave=wave[["wave"]],indCos=wave[["indCos"]],n=n)
+@
+
+
+As another example of the use of the two-dimensional real Fourier transform, the following
+code shows how an image can be reconstructed with varying resolution. In
+the code, we first define a two-dimensional image on a $50 \times 50$ grid. We then construct three
+different $\mat \Phi_i$s using the function \func{get.real.dft.mat}. Dimension
+reduction is done using the function \func{spate.init}. The argument
+\func{NF} specifies the number of Fourier functions. Since the image is defined
+on a $50 \times 50$ grid, the total number of Fourier terms is $2500$. As can be seen in the code, we construct reduced dimensional $\mat
+\Phi_i$s with \func{NF=45} and \func{NF=101}. Reduced dimensional
+reconstructions of the image $\vect \Psi$ are the obtained by calculating
+$\mat \Phi_i
+\mat \Phi_i'\vect \Psi$. Figure \ref{fig:ImageRecon} shows the results.
+<<label=ImageRecon,echo=TRUE>>=
+## Example: reduced dimensional image reconstruction
+n <- 50
+## Define image
+image <- rep(0,n*n)
+for(i in 1:n){
+  for(j in 1:n){    
+    image[(i-1)*n+j] <- cos(5*(i-n/2)/n*pi)*sin(5*(j)/n*pi)*
+      (1-abs(i/n-1/2)-abs(j/n-1/2))
+  }
+}
+## Low-dimensional: only 45 (of potentially 2500) Fourier functions
+spateObj <- spate.init(n=n,T=17,NF=45)
+Phi.LD <- get.real.dft.mat(wave=spateObj$wave, indCos=spateObj$indCos,
+                  ns=spateObj$ns, n=n)
+## Mid-dimensional: 545 (of potentially 2500) Fourier functions
+spateObj <- spate.init(n=n,T=17,NF=101)
+Phi.MD <- get.real.dft.mat(wave=spateObj$wave, indCos=spateObj$indCos,
+                  ns=spateObj$ns, n=n)
+## High-dimensional: all 2500 Fourier functions
+spateObj <- spate.init(n=n,T=17,NF=2500)
+Phi.HD <- get.real.dft.mat(wave=spateObj$wave, indCos=spateObj$indCos,
+                  ns=spateObj$ns, n=n)
+## Aply inverse Fourier transform, dimension reduction, 
+## and then Fourier transform
+image.LD <- Phi.LD %*% (t(Phi.LD) %*% image)
+image.MD <- Phi.MD %*% (t(Phi.MD) %*% image)
+image.HD <- Phi.HD %*% (t(Phi.HD) %*% image)
+@ 
+
+\setkeys{Gin}{width=\textwidth} 
+\begin{figure}[!h]
+  \centering
+<<label=ImageRecon2,fig=TRUE,echo=FALSE,width=7,height=7>>=
+par(mfrow=c(2,2),mar=c(2,3,2,1))
+image(1:n, 1:n, matrix(image, nrow = n),col = cols(),xlab="",ylab="",main="Original image")
+image(1:n, 1:n, matrix(image.LD, nrow = n),col = cols(),xlab="",ylab="",main="45 of 2500 Fourier terms")
+image(1:n, 1:n, matrix(image.MD, nrow = n),col = cols(),xlab="",ylab="",main="101 of 2500 Fourier terms")
+image(1:n, 1:n, matrix(image.HD, nrow = n),col = cols(),xlab="",ylab="",main="All 2500 Fourier terms")
+@ 
+\caption{Example of use of Fourier transform: reduced dimensional image reconstruction} 
+\label{fig:ImageRecon}
+\end{figure}
+ 
+
+
+\section{Simulation and plotting}\label{simulation}
+The function \code{spate.sim} allows for simulating from the SPDE based
+spatio-temporal Gaussian process model defined through \eqref{SolFTVec} and
+\eqref{SolCoef}. The function returns a \code{"spateSim"} object containing the sample $\vect \xi$, the
+coefficients $\vect \alpha$, as well as the observed $\vect w$ obtained by
+adding a nugget effect to $\vect \xi$. The argument \code{par} is a vector of
+parameters $\vect \theta$  in the following order $\vect
+\theta=(\rho_0,\sigma^2,\zeta,\rho_1,\gamma,\alpha,\mu_x,\mu_y,\tau^2)'$. An
+initial state, or starting value, $\vect \xi(t_1)$ for the dynamic model
+can be given through the argument \code{StartVal}.  The starting field needs to
+be a stacked vector of lengths $n^2$ (number of spatial points). Use
+\code{as.vector()} to convert a spatial matrix to a vector. \code{"spateSim"}
+objects can be plotted with the function \code{plot.spateSim}. The code
+below illustrates the use of these functions. Note that
+\code{indScale=TRUE} specifies that each field has its individual scale on
+the z-axis rather than having one common scale for all six images. Figure
+\ref{fig:SimSPDE} shows one example of a simulated space-time process.
+\begin{figure}[!h]
+  \centering
+<<label=SimSPDE,fig=TRUE,echo=TRUE,width=15,height=3>>=
+StartVal <- rep(0,100^2)
+StartVal[75*100+75] <- 1000
+par <- c(rho0=0.05,sigma2=0.7^2,zeta=-log(0.99),rho1=0.06,
+         gamma=3,alpha=pi/4,muX=-0.1,muY=-0.1,tau2=0.00001)
+spateSim <- spate.sim(par=par,n=100,T=5,StartVal=StartVal,seed=1)
+plot(spateSim,mfrow=c(1,5),mar=c(2,2,2,2),indScale=TRUE,
+     cex.axis=1.5,cex.main=2)
+@
+\caption{Simulated spatio-temporal Gaussian process as defined in
+  \eqref{SolFTVec} and \eqref{SolCoef}} 
+\label{fig:SimSPDE}
+\end{figure}
+
+
+\section{Inference:  log-likelihood evaluation and sampling from the full
+  conditional}\label{inference}
+The function \code{ffbs.spectral} implements the computationally
+efficient Kalman filter and backward sampling algorithms in the spectral
+space for the model specified in \eqref{GausObs}, \eqref{SolFTVec}, and \eqref{SolCoef}. The logical arguments \code{lglk} or
+\code{BwSp} control whether evaluation of the
+log-likelihood, sampling from the full conditional of the coefficients
+$\vect \alpha$, or both are done. This is a wrapper function and the actual
+calculation is done in C. Note that either the actual observed data
+$\vect w$ can be given or the Fourier transform $\widehat{\vect w}$
+(\code{wFT}). The latter is useful if, for instance, the log-likelihood needs to be
+evaluated several times given the same $\vect w$. The Fourier
+transform is then calculated only once, instead of each time the function is
+called. \code{loglike} and \code{sample.four.coef} are wrapper functions
+that call \code{ffbs.spectral}.
+
+\subsection{Example of use of \code{sample.four.coef}}
+The following code illustrates the use of the function
+\code{sample.four.coef}. First, we simulate data $\vect w$, and then we
+sample from the full conditional of the coefficients $[\vect \alpha
+|\cdot]$ to obtain samples from the posterior of the latent process. For simplicity, the
+parameters $\vect \theta$ are fixed at their true values. In Figure \ref{fig:FullCond}, the results are shown. In the top
+plot, the simulated data is displayed and in the bottom plots the mean of
+full conditional of the process $\vect \xi=\mat \Phi \vect \alpha$. The latter is obtained by
+drawing 50 samples from the full conditional $[\vect \alpha |\cdot]$,
+calculating their mean, and applying the Fourier transform.
+
+<<label=FullCond1,fig=FALSE,echo=TRUE>>=
+## Example of use of 'sample.four.coef'
+## Simulate data
+n <- 50
+T <- 4
+par <- c(rho0=0.1,sigma2=0.2,zeta=0.5,rho1=0.1,
+         gamma=2,alpha=pi/4,muX=0.2,muY=-0.2,tau2=0.01)
+spateSim <- spate.sim(par=par,n=n,T=T,seed=4)
+w <- spateSim$w
+## Sample from full conditional
+Nmc <- 50
+alphaS <- array(0,c(T,n*n,Nmc))
+wFT <- real.fft.TS(w,n=n,T=T)
+for(i in 1:Nmc){
+  alphaS[,,i] <- sample.four.coef(wFT=wFT,par=par,n=n,T=T,NF=n*n)
+}
+## Mean from full conditional
+alphaMean <- apply(alphaS,c(1,2),mean)
+xiMean <- real.fft.TS(alphaMean,n=n,T=T,inv=FALSE)
+@ 
+\begin{figure}[!h]
+  \centering
+<<label=FullCond2,fig=TRUE,echo=FALSE,width=7,height=3.5>>=
+par(mfrow=c(2,4),mar=c(1,1,1,1))
+for(t in 1:4) image(1:n,1:n,matrix(w[t,],nrow=n),xlab="",ylab="",col=cols(),main=paste("w(",t,")",sep=""),xaxt='n',yaxt='n')
+for(t in 1:4) image(1:n,1:n,matrix(xiMean[t,],nrow=n),xlab="",ylab="",col=cols(),,main=paste("xiPost(",t,")",sep=""),xaxt='n',yaxt='n')
+@
+\caption{Sampling from the full conditional of the coefficients: comparison
+of observed data (top plots) and mean of full conditional of $\vect \xi$
+(bottom plots).} 
+\label{fig:FullCond}
+\end{figure}
+
+
+
+\subsection{Example of use of \code{loglike}}
+The following code provides an example of the use of \code{loglike}. We
+use the same simulated data as in the previous example and evaluate the
+log-likelihood at the true parameter values. The code also demonstrates
+that the function \code{loglike} does the same thing whether one uses the original data
+$\vect w$ or their Fourier transform $\widehat{\vect w}=$\code{wFT}. For an
+example on how to do maximum likelihood estimation, see the next section.
+
+<<label=LL,fig=FALSE,echo=TRUE>>=
+## Evaluation of log-likelihood
+loglike(par=par,w=w,n=n,T=T)
+## Equivalently, one can use the Fourier transformed data 'wFT'
+loglike(par=par,wFT=wFT,n=n,T=T)
+@ 
+
+
+\subsection{Maximum likelihood estimation}\label{mle}
+With the function \code{loglike}, one can do maximum likelihood
+estimation. The following code shows an example of how this can be
+done using a general purpose optimizer, e.g., implemented in the R function
+\code{optim}. First, simulated data is generated. Then
+\code{optim} is used to minimize the negative log-likelihood. In the code
+when calling \code{loglike}, we set \code{negative=TRUE} as an argument for
+\code{loglike} so that it returns the negative log-likelihood. Further,
+with \code{logScale=TRUE} we specify that certain parameters are on the
+logarithmic scale to ensure positivity constraints. \code{logInd} is a
+vector of natural numbers indicating which parameters in \code{par} are on the logarithmic scale. Additional
+constraints, e.g., on the angle of the diffusion anisotropy $\alpha$ or on
+the drift terms $\mu_x$ and $\mu_y$ are set by using the
+'L-BFGS-B' algorithm called by setting \code{method="L-BFGS-B"} in the
+\code{optim} function. The results show the estimated parameters,
+transformed back to the original scale, as well as 95$\%$ confidence
+intervals. Evaluating the likelihood for this $8000$ dimensional Gaussian
+process ($20\times 20 \times 20$) takes about $0.008$ seconds on a desktop
+PC (AMD Athlon(tm) 64 X2 Dual Core Processor 5600+). This is achieved without
+applying any dimension reduction. The entire inference takes less than $12$ seconds.
+<<label=MLE,fig=FALSE,echo=TRUE>>=
+## Simulate data
+n <- 20
+T <- 20
+par <- c(rho0=0.1,sigma2=0.2,zeta=0.5,rho1=0.1,
+         gamma=2,alpha=pi/4,muX=0.2,muY=-0.2,tau2=0.01)
+spateSim <- spate.sim(par=par,n=n,T=T,seed=4)
+w <- spateSim$w
+
+## Initial values for optim
+parI <- c(rho0=0.2,sigma2=0.1,zeta=0.25,rho1=0.01,gamma=1,
+          alpha=0.3,muX=0,muY=0,tau2=0.005)
+## Transform to log-scale
+logInd=c(1,2,3,4,5,9)
+parI[logInd] <- log(parI[logInd])
+## Maximum likelihood estimation using optim
+wFT <- real.fft.TS(w,n=n,T=T)
+spateMLE <- optim(par=parI,loglike,control=list(trace=TRUE,maxit=1000),
+                  wFT=wFT,method="L-BFGS-B",
+                  lower=c(-10,-10,-10,-10,-10,0,-0.5,-0.5,-10),
+                  upper=c(10,10,10,10,10,pi/2,0.5,0.5,10),
+                  negative=TRUE,logScale=TRUE,
+                  logInd=c(1,2,3,4,5,9),hessian=TRUE,n=n,T=T)
+mle <- spateMLE$par
+mle[logInd] <- exp(mle[logInd])
+sd=sqrt(diag(solve(spateMLE$hessian)))
+## Calculate confidence intervals
+MleConfInt <- data.frame(array(0,c(4,9)))
+colnames(MleConfInt) <- names(par)
+rownames(MleConfInt) <- c("True","Estimate","Lower","Upper")
+MleConfInt[1,] <- par
+MleConfInt[2,] <- mle
+MleConfInt[3,] <- spateMLE$par-2*sd
+MleConfInt[4,] <- spateMLE$par+2*sd
+MleConfInt[c(3,4),logInd] <- exp(MleConfInt[c(3,4),logInd])
+## Results: estimates and confidence intervals
+round(MleConfInt,digits=3)
+@
+
+
+
+
+\subsection{Bayesian inference using MCMC}
+Using \code{sample.four.coef} and \code{loglike} a Markov chain Monte
+Carlo (MCMC) algorithm for drawing from the joint posterior of the latent
+process $\vect \alpha$, or equivalently $\vect \xi$, and the hyper-parameters
+$\vect \theta$ can be constructed. 
+
+One approach is to sample iteratively from $[\vect{\theta}|\cdot]$ using a Metropolis-Hastings step and from
+$[\vect{\alpha}|\cdot]$ with a Gibbs step. In many situations, $\vect{\alpha}$
+and $\vect{\theta}$ can be strongly dependent a posteriory. Consequently, if one samples
+successively from $[\vect{\theta}|\cdot]$ and $[\vect{\alpha}|\cdot]$, one
+can run into slow mixing properties. The reasons is that in each step
+$[\vect{\theta}|\cdot]$ is constrained by the last sample of the latent process, and vice
+versa. To circumvent this problem, one can sample jointly from
+$[\vect{\theta},\vect{\alpha}|\cdot]$. A joint proposal
+$(\vect{\theta}^*,\vect{\alpha}^*)$ is obtained by sampling
+$\vect{\theta}^*$ from a Gaussian distribution with the mean equaling the
+last value and an appropriately chosen covariance matrix and then sampling
+$\vect{\alpha}^*$ from $[\vect{\alpha}|\vect{\theta}^*,\cdot]$. The second
+step can be done using \code{sample.four.coef}. It can be shown that the acceptance probability then equals 
+  \begin{equation}
+ \min\left(1,\frac{P[\vect{\theta}^*|\vect{w}]}{P[\vect{\theta}^{(i)}|\vect{w}]}\right),
+  \end{equation}
+where the likelihood $P[\vect{\theta}|\vect{w}]$ denotes the value of the density of
+$\vect{\theta}$ given $\vect{w}$ evaluated at $\vect{\theta}$, and where $\vect{\theta}^*$ and
+$\vect{\theta}^{(i)}$ denote the proposal and the last value of
+$\vect{\theta}$, respectively. Since this acceptance ratio does not depend
+on $\vect \alpha$, the parameters $\vect{\theta}$ can move faster in their
+parameter space. Note that $P[\vect{\theta}|\vect{w}]$ can be
+calculated using the function \code{loglike}.
+
+\subsubsection{Skewed Tobit model and missing data}
+For the transformed Tobit model \eqref{Tobit}, inference is done analogously. One
+just adds a Metropolis-Hastings step for the transformation
+parameter $\lambda$ and a Gibbs step for the censored values $y(t,\vect
+s_l)=0$. The latter consists in simulating from a censored normal distribution
+with mean $\xi^{(i)}(t,\vect s_l)$ and variance $\tau^2$. See
+\citet{SiKuSt11} for more details.
+
+As said, missing values can be dealt with by using a data augmentation
+approach. This means that one adds a Gibbs step consisting in simulating from a
+normal distribution with mean $\xi^{(i)}(t,\vect s_l)$ and variance $(\tau^2)^{(i)}$ for
+those points where $w(t,\vect s_l)$, or $y(t,\vect s_l)$, are missing.
+
+\section{An MCMC algorithm}
+It is well known that the performance of MCMC algorithms can be very dependent on the given data,
+and that data specific tuning is often needed. Having this in mind, the function
+\code{spate.mcmc} implements an MCMC algorithm that needs as little
+additional fine tuning as possible. It can deal with both Gaussian and skewed Tobit
+likelihoods through the argument \code{DataModel}. Sampling is done as outlined in the previous section. I.e.,
+the coefficients $\vect{\alpha}$ and the hyper-parameters $\vect{\theta}$
+are sampled together to obtain faster mixing. Further, an adaptive
+algorithm \citep{RoRo09} is used. This means that the proposal covariances
+\code{RWCov} for the Metropolis-Hastings step of $\vect \theta$ are successively estimated such that an
+optimal acceptance rate is obtained. 
+
+The function
+\code{spate.mcmc} returns an object of the class \code{"spateMCMC"} with,
+among others,
+samples from the posterior of the hyper-parameters stored in the matrix
+\code{Post}, the estimated proposal covariance matrix \code{RWCov}, and samples
+from the posterior of the latent process $\vect \xi$ in \code{xiPost} if
+\code{saveProcess=TRUE} was chosen. There are \code{plot} and \code{print}
+functions for \code{"spateMCMC"} objects. 
+\subsection{Arguments of \code{spate.mcmc}}
+\begin{itemize}
+  \item If covariates $\mat x$ are given, the algorithm can
+either sample the coefficients $\vect \beta$ in an additional Gibbs step
+from the Gaussian full conditional of the coefficients $[\vect
+\beta|\cdot]$ (\code{FixEffMetrop=FALSE}) or sample $\vect \beta$ together
+with $\vect \theta$  in the Metropolis-Hastings step (\code{FixEffMetrop=TRUE}). The latter is preferable since the
+random effects $\vect \xi$ and the fixed effects $\mat x \vect \beta$ can
+be strongly dependent, which can result in very slow mixing if $\vect \beta$
+and $\vect \xi$ are sampled iteratively and not jointly. 
+
+\item The number of samples to be drawn from the Markov chain is specified in
+\code{Nmc} and the length of the burn-in in \code{BurnIn}. 
+
+\item If the option \code{trace=TRUE} is selected, the MCMC
+algorithm prints running status messages such as acceptance rates of the
+hyper-parameters and estimated remaining computing time. Additionally, if choosing
+\code{plotTrace=TRUE}, running trace plots of the Markov chains are generated.  Further, using
+\code{SaveToFile=TRUE}, the \code{"spateMCMC"} object can be successively
+saved in a directory specified through \code{path} and \code{file}.
+
+\item Dimension reduction can be applied by
+setting \code{DimRed=TRUE} and specifying through \code{NFour} the number of
+Fourier functions to be used. 
+
+\item If the observations \code{y} are not on a
+grid, \code{y} can be a $T\times N$ matrix where $N (<n^2)$ is the number of
+observation stations, and the coordinates of the stations can be specified
+in the $N \times 2$ matrix \code{coord}. Alternatively, one can specify
+through the vector \code{Sind} at which grid point each observation lies. 
+
+\item If the boolean argument \code{IncidenceMat} equals \code{TRUE}, an incidence matrix $\mat I$ is
+constructed and the model in \eqref{Incidence} is used. In that case,
+dimension reduction needs to be done since one cannot use the fast spectral
+algorithms in combination with the FFT
+anymore. 
+
+\item Padding can be applied by choosing \code{Padding=TRUE}. 
+
+\item The vector of integers \code{indEst} specifies which parameters
+  should be estimated and which not. By default this equals
+  \code{c(1,\dots,9)}. If, for instance, one wants to fit a separable model, one
+  can choose \code{indEst=c(1,2,3,9)} in combination with
+  \code{SV=(0.2,0.1,0.25,0,0,0,0,0,0.001)}. The latter sets the initial
+  values of the diffusion and drift term to zero. Since they are not
+  sampled, they remain at zero.
+\end{itemize}
+
+For more
+details and explanations on, e.g., starting values, specification of prior
+distributions, selection of output for monitoring the MCMC algorithm, etc.,
+see the help information of \code{spate.mcmc}.
+
+\subsection{Additional fine tuning}
+In case the MCMC algorithm still needs some fine tuning, the
+following arguments can be varied: 
+\begin{itemize}
+  \item the initial covariance matrix \code{RWCov}, 
+    \item the burn-in length \code{BurnInCovEst}
+before starting with the adaptive estimation of \code{RWCov}, 
+\item the
+minimal number of MCMC samples \code{NCovEst} required after the burn-in for estimating
+\code{RWCov}. 
+\end{itemize}
+Due to the adaptive nature of the algorithm, the initial choice of
+\code{RWCov} is less important. However, if \code{RWCov} is overly large, the
+algorithm can have very small acceptance rates with the chain barely moving at all. On the other hand, if
+\code{RWCov} overly small, acceptance rates might be high, but the chain
+does not cover the parameter space. 
+
+If choosing adequate an \code{RWCov}
+turns out difficult, we propose the following strategy. For each
+hyper-parameter $\theta_i$ in $\vect \theta$, one searches for an
+appropriate variance $\sigma^2_i$ when fixing all other parameters. This
+can be done by specifing through the
+argument \code{indEst} which parameters should be estimated and which not. For instance, if
+\code{indEst=1}, only for the first parameter $\rho_0$ a Markov chain is
+run, and the others are fixed. Using this, an appropriate $\sigma^2_i$ can be
+found as follows. For instance, one starts with a very low $\sigma^2_i$, and then increases it
+subsequently until the acceptance rate for $\theta_i$, when fixing all
+other parameters, is at a reasonable level, say, around $0.4$. After doing this for each parameter $\theta_i$, \code{RWCov}=diag($\sigma^2_i$) can
+be used as initial covariance matrix. Note that the goal is not to find an
+optimal proposal covariance matrix but rather just to get a rough idea on
+the appropriate order of magnitude so that the algorithm is not ``degenerate'' from the beginning.
+
+
+\subsection{An example of the use of \code{spate.mcmc}}
+The following code illustrates the use of \code{spate.mcmc} on a simulated
+data set. The MCMC algorithm is
+run for $10000$ samples with a burn-in of $2000$. The burn-in for the adaptive covariance estimation is $500$
+and the minimal number of samples required for estimating the proposal
+covariance matrix of the Metropolis-Hasting step is also $500$. This means that
+after $1000$ samples, the proposal covariance matrix is first
+estimated. Subsequently, it is estimated every $500$ samples based on the
+past excluding the first $500$ samples from the Markov chain. Figure
+\ref{fig:MCMC} shows trace plots of the MCMC algorithm. The vertical lines represent the
+  burn-in period, and the horizontal lines are the true values of the parameters. The figure shows how the
+mixing of the Markov chain improves with increasing time. Note that the number
+of samples, $10000$, is used for illustration. In practice, more samples are
+needed. 
+
+<<label=MCMC1,eval=FALSE>>=
+## Simulate data
+par <- c(rho0=0.1,sigma2=0.2,zeta=0.5,rho1=0.1,
+gamma=2,alpha=pi/4,muX=0.2,muY=-0.2,tau2=0.01)
+spateSim <- spate.sim(par=par,n=20,T=20,seed=4)
+w <- spateSim$w
+## This is an example to illustrate the use of the MCMC algorithm. 
+## In practice, more samples (Nmc) are needed for a sufficiently 
+## large effective sample size.
+spateMCMC <-spate.mcmc(y=w,x=NULL,SV=c(rho0=0.2,sigma2=0.1,
+                                   zeta=0.25,rho1=0.2,gamma=1,
+                                   alpha=0.3,muX=0,muY=0,tau2=0.005),
+                      RWCov=diag(c(0.005,0.005,0.05,0.005,
+                        0.005,0.001,0.0002,0.0002,0.0002)),
+                      Nmc=10000,BurnIn=2000,seed=4,NCovEst=500,
+                      BurnInCovEst=500,trace=FALSE,Padding=FALSE)
+@
+<<label=MCMC1,eval=TRUE,echo=FALSE>>=
+## Simulate data
+par <- c(rho0=0.1,sigma2=0.2,zeta=0.5,rho1=0.1,gamma=2,alpha=pi/4,muX=0.2,muY=-0.2,tau2=0.01)
+spateSim <- spate.sim(par=par,n=20,T=20,seed=4)
+w <- spateSim$w
+data("spateMCMC")
+@
+<<label=MCMC3,eval=TRUE>>=
+spateMCMC
+@
+
+\begin{figure}[!h]
+  \centering
+<<label=MCMC4,fig=TRUE,echo=TRUE,width=7,height=7>>=
+plot(spateMCMC,true=par,hist=FALSE,ask=FALSE)
+@
+\caption{Trace plots from the MCMC algorithm. The vertical line shows the
+  burn-in, and the horizontal lines are the true values of the parameters.} 
+\label{fig:MCMC}
+\end{figure}
+
+The following code illustrates the use of \code{spate.mcmc} when an
+incidence matrix approach (see \eqref{Incidence}) is used in combination with dimension
+reduction. This is the real data application used in \cite{SiKuSt12} where, roughly
+speaking, the goal is to model a spatio-temporal precipitation
+field. We are not showing any results here, but we only illustrate how
+the function \code{spate.mcmc} is called. For more details, we refer to \cite{SiKuSt12}. A skewed Tobit
+model is used as data model. The observed data is not available on the full $100\times 100$ grid but
+only at 32 observation locations. Observations are made at $720$ time
+points. In the code below, \code{y} is a $720 \times
+32$ matrix, and \code{covTS} is a $2\times 720 \times32$ array containing
+two covariates. \code{Sind} is a vector of length 32 indicating the grid
+cells in which the observation stations lie. \code{DataModel="SkewTobit"}
+specifies that a skewed Tobit likelihood is used. \code{DimRed=TRUE} and
+\code{NFour=29} indicate that a reduced dimensional model consiting of 29
+Fourier functions is used. By setting \code{IncidenceMat=TRUE}, we specify
+that an incidence matrix is used. Finally, \code{FixEffMetrop=TRUE}
+indicates that the coefficients of the covariates are sampled together with
+the hyper-parameters of the spatio-temporal model in order to avoid slow
+mixing due to correlations between fixed and random effects.
+<<label=MCMC1,eval=FALSE,echo=TRUE>>=
+spateMCMC <- spate.mcmc(y=y,x=covTS,DataModel="SkewTobit",Sind=Sind,
+                        n=100,DimRed=TRUE,NFour=29,
+                        IncidenceMat=TRUE,FixEffMetrop=TRUE,Nmc=105000,
+                        BurnIn=5000,Padding=TRUE,
+                        NCovEst=500,BurnInCovEst=1000)
+@ 
+\subsection{Making predictions with \func{spate.predict}}
+The function \func{spate.predict} allows for making probabilistic prediction. It takes
+a \func{spateMCMC} object containing samples from the posterior of the hyper-parameters
+as argument. The function then internally calls \func{spate.mcmc} where now
+the Metropolis-Hastings step for the hyper-parameters is skipped since
+these are given, and simulation is only done for the latent coefficients
+$\vect \alpha$. In doing so, samples from the predictive distribution are
+generated. The time points where predictions are to be made are
+specified through the argument \func{tPred}. Spatial points are either
+specified through \func{sPred} (grid points) or \func{xPred} and
+\func{yPred} (coordinates). If no spatial points are selected, predictions
+will be made for the entire fields at the time points chosen in \func{tPred}. In the example, we make predictions at time points
+$t=21,22,23$ for the entire spatial fields using \func{Nsim=100} samples. Figure \ref{fig:predict} shows means and standard
+deviations of the predicted fields.
+
+<<label=predict1,echo=TRUE>>=
+## Make predictions
+predict <- spate.predict(y=w, tPred=(21:23), 
+                         spateMCMC=spateMCMC, Nsim = 100, 
+                         BurnIn = 10, DataModel = "Normal",seed=4)
+Pmean <- apply(predict,c(1,2),mean)
+Psd <- apply(predict,c(1,2),sd)
+@
+
+\begin{figure}[!h]
+\centering
+<<label=predict2,fig=TRUE,echo=FALSE,width=7,height=4.66>>=
+par(mfrow=c(2,3),mar=c(2,2,2,2))
+zlim=c(min(Pmean),max(Pmean))
+for(i in 1:3){
+  image(1:20,1:20,matrix(Pmean[i,],nrow=20),zlim=zlim,
+        main=paste("Mean predicted field at t=",i+20,sep=""),
+        xlab="",ylab="",col=cols())
+}
+
+zlim=c(min(Psd),max(Psd))
+for(i in 1:3){
+  image(1:20,1:20,matrix(Psd[i,],nrow=20),zlim=zlim,
+        main=paste("Sd of predicted field at t=",i+20,sep=""),
+        xlab="",ylab="",col=cols())
+}
+@
+\caption{Means and standard deviations of predicted fields.} 
+\label{fig:predict}
+\end{figure}
+
+\section*{Acknowledgments}
+We would like to thank Martin M\"achler for his helpful support and advice.
+
+
+\begin{thebibliography}{9}
+\newcommand{\enquote}[1]{``#1''}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+
+\bibitem[{Borgman et~al.(1984)Borgman, Taheri, and Hagan}]{BoTaHa84}
+Borgman, L., Taheri, M., and Hagan, R. (1984), \enquote{Three-dimensional
+  frequency-domain simulations of geological variables,} in
+  \textit{Geostatistics for Natural Resources Characterization}, ed. Verly, G.,
+  D. Reidel, pp. 517--541.
+
+\bibitem[{Cressie and Wikle(2011)}]{CrWi11}
+Cressie, N. and Wikle, C.~K. (2011), \textit{Statistics for spatio-temporal
+  data}, Wiley Series in Probability and Statistics, John Wiley $\&$ Sons, Inc.
+
+\bibitem[{{Dudgeon} and {Mersereau}(1984)}]{DuMe84}
+{Dudgeon}, D.~E. and {Mersereau}, R.~M. (1984), \textit{{Multidimensional
+  digital signal processing}}, Prentice-Hall.
+
+\bibitem[{Paciorek(2007)}]{Pa07}
+Paciorek, C.~J. (2007), \enquote{{Bayesian smoothing with Gaussian processes
+  using Fourier basis functions in the spectralGP package},} \textit{Journal of
+  Statistical Software}, 19, 1--38.
+
+\bibitem[{Roberts and Rosenthal(2009)}]{RoRo09}
+Roberts, G.~O. and Rosenthal, J.~S. (2009), \enquote{{Examples of adaptive
+  MCMC},} \textit{Journal of Computational and Graphical Statistics}, 18,
+  349--367.
+
+\bibitem[{Royle and Wikle(2005)}]{RoWi05}
+Royle, J.~A. and Wikle, C.~K. (2005), \enquote{Efficient statistical mapping of
+  avian count data,} \textit{Environmental and Ecological Statistics}, 12,
+  225--243.
+
+\bibitem[{Sigrist et~al.(2012)Sigrist, K{\"u}nsch, and Stahel}]{SiKuSt11}
+Sigrist, F., K{\"u}nsch, H.~R., and Stahel, W.~A. (2012), \enquote{A Dynamic
+  Non-stationary Spatio-temporal Model for Short Term Prediction of
+  Precipitation,} \textit{Annals of Applied Statistics (to appear)}, 6, --.
+
+\bibitem[{{Sigrist} et~al.(2012){Sigrist}, {K{\"u}nsch}, and
+  {Stahel}}]{SiKuSt12}
+{Sigrist}, F., {K{\"u}nsch}, H.~R., and {Stahel}, W.~A. (2012), \enquote{{SPDE
+  based modeling of large space-time data sets},} \textit{Preprint
+  (http://arxiv.org/abs/1204.6118)}.
+
+\bibitem[{Wikle et~al.(1998)Wikle, Berliner, and Cressie}]{WiBeCr98}
+Wikle, C.~K., Berliner, L.~M., and Cressie, N. (1998), \enquote{{Hierarchical
+  Bayesian space-time models},} \textit{Environmental and Ecological
+  Statistics}, 5, 117--154.
+
+\end{thebibliography}
+
+\end{document}
+
+
+
+
+
+

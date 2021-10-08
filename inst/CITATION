@@ -1,0 +1,21 @@
+citHeader("To cite spate in publications use:")
+
+citEntry(entry = "Article",
+  title        = "{spate}: An {R} Package for Spatio-Temporal Modeling with a Stochastic Advection-Diffusion Process",
+  author       = personList(as.person("Fabio Sigrist"),
+                   as.person("Hans R. K\\\"unsch"),
+                   as.person("Werner A. Stahel")),
+  journal      = "Journal of Statistical Software",
+  year         = "2015",
+  volume       = "63",
+  number       = "14",
+  pages        = "1--23",
+  url          = "http://www.jstatsoft.org/v63/i14/",
+
+  textVersion  =
+  paste("Fabio Sigrist, Hans R. Kuensch, Werner A. Stahel (2015).",
+        "spate: An R Package for Spatio-Temporal Modeling with a Stochastic Advection-Diffusion Process.",
+        "Journal of Statistical Software, 63(14), 1-23.",
+        "URL http://www.jstatsoft.org/v63/i14/.")
+)
+
