@@ -10,12 +10,12 @@ citEntry(entry = "Article",
   volume       = "63",
   number       = "14",
   pages        = "1--23",
-  url          = "http://www.jstatsoft.org/v63/i14/",
+  doi          = "https://doi.org/10.1111/rssb.12061",
 
   textVersion  =
   paste("Fabio Sigrist, Hans R. Kuensch, Werner A. Stahel (2015).",
         "spate: An R Package for Spatio-Temporal Modeling with a Stochastic Advection-Diffusion Process.",
         "Journal of Statistical Software, 63(14), 1-23.",
-        "URL http://www.jstatsoft.org/v63/i14/.")
+        "URL https://doi.org/10.1111/rssb.12061.")
 )
 
