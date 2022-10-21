@@ -110,10 +110,10 @@ Logical; if 'TRUE' tracing information on the progress of the MCMC algorithm is 
 }
 \value{
   Depending on whether 'xPred' and 'yPred' are empty or not, either
-  \item{}{an array of size t x s x Nsim where the first index is for time, the second
+  \item{(i)}{an array of size t x s x Nsim where the first index is for time, the second
     for space, and the third for the number of samples 'Nsim'}
   or
-  \item{}{a matrix of size length(tPred) x Nsim}
+  \item{(ii)}{a matrix of size length(tPred) x Nsim}
 }
 \author{
 Fabio Sigrist

@@ -1,40 +1,17 @@
+/*
+ * C functions for the spate R package
+ *
+ * Author: Fabio Sigrist
+ */
+
+#include <stdlib.h>
 #include <R.h>
 #include <Rmath.h>
-#include <stdlib.h>
+#include <Rinternals.h>
+#include <R_ext/Applic.h>
+#include <R_ext/Rdynload.h>
 #include <fftw3.h>
 
-
-
-/* printf("%d",j); */
-/* printf("%s","\n"); */
-/* printf("%f",out[j-1][1]); */
-/* printf("%s","\n"); */
-
-
-/* void fftc(int *n, double wr[], double wc[], int *inverse){ */
-/*   fftw_complex *in, *out; */
-/*   fftw_plan p; */
-/*   int i; */
-/*   in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * *n * *n); */
-/*   out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * *n * *n); */
-/*   for(i=0; i<(*n * *n);i++){ */
-/*     in[i][0]=wr[i]; */
-/*     in[i][1]=wc[i]; */
-/*   } */
-/*   if(*inverse==1){ */
-/*     p = fftw_plan_dft_2d(*n,*n, in, out, FFTW_FORWARD, FFTW_ESTIMATE); */
-/*   } */
-/*   else{ */
-/*     p = fftw_plan_dft_2d(*n,*n, in, out, FFTW_BACKWARD, FFTW_ESTIMATE); */
-/*   } */
-/*   fftw_execute(p); */
-/*   fftw_destroy_plan(p); */
-/*   for(i=0; i<(*n * *n);i++){ */
-/*     wr[i]=out[i][0]; */
-/*     wc[i]=out[i][1]; */
-/*   } */
-/*   fftw_free(in); fftw_free(out); */
-/* } */
 
 void real_fft(int *n, double yh[], int *inverse, int indCos[], int indW[], int indWCon[], int *NFc){
   fftw_complex *in, *out;
@@ -57,10 +34,6 @@ void real_fft(int *n, double yh[], int *inverse, int indCos[], int indW[], int i
       yh[indCos[i]]=-sqrt(2) * out[indW[indCos[i]]-1][1]/ *n;
     }
   }else{
-    /* for(i=0; i<(*n * *n);i++){ */
-    /*   in[i][0]=0; */
-    /*   in[i][1]=0; */
-    /* } */
     for(i=0; i<4;i++){
        in[indW[i]-1][0]=yh[i];
        in[indW[i]-1][1]=0;
@@ -77,7 +50,6 @@ void real_fft(int *n, double yh[], int *inverse, int indCos[], int indW[], int i
       yh[i]=out[i][0]/ *n;
     }
   }
-/* printf("      *********         test 1       *********          "); */
   if (NULL != in) fftw_free(in);
   if (NULL != out) fftw_free(out);
   if (NULL != p) fftw_destroy_plan(p);
@@ -91,22 +63,6 @@ void TSreal_fft(int *n, int *T, double yh[], int *inverse, int indCos[], int ind
     real_fft(n, &yh[t * *n * *n], inverse, indCos, indW, indWCon, NFc);
   }
 }
-
-
-/* void kf2x2diagC(double res[], double spec[], double G11[], double G12[], double *tau2, int *T, int *NFc){ */
-/*   int t,j; */
-/*   double rtt,rtt1; */
-/*   for(j=1; j<=*NFc;j++){ */
-/*     rtt=spec[j-1]; */
-/*     rtt1=0; */
-/*     for(t=1; t<=*T;t++){ */
-/*       rtt1=rtt*(pow(G11[j-1],2)+pow(G12[j-1],2))+spec[j-1]; */
-/*       res[(j-1)* *T + t-1]=rtt1; */
-/*       rtt=rtt1*(1-rtt1/(*tau2+rtt1)); */
-/*       /\* Rprintf(&t); *\/ */
-/*     } */
-/*    } */
-/* } */
 
 void propagate_spectral(double xtp1[], double xt[], double G11C[], double G11[], double G12[], int *NFc, int *ns){
   int j;
@@ -194,7 +150,9 @@ void ll_spectral(double *ll, double wFT[], double mtt1[], double rtt1[],  int *T
   *ll = *ll/2-*T * *NF * log(2*M_PI)/2;
 }
 
-void ffbs_spectral(double wFT[], double *bw, double *ll, double specCosOnly[], double G11C[], double specCosSine[], double G11[], double G12[], double specAll[], double *tau2, int *T, int *NFc, int *ns){/* , double simAlpha[] */
+void ffbs_spectral(double wFT[], double *bw, double *ll, double specCosOnly[], 
+    double G11C[], double specCosSine[], double G11[], double G12[], 
+    double specAll[], double *tau2, int *T, int *NFc, int *ns){
   int NF=(2 * *NFc + *ns);
   int j;
   double *rtt = (double *) malloc(NF * (*T +1)*sizeof(*rtt));
@@ -211,8 +169,6 @@ void ffbs_spectral(double wFT[], double *bw, double *ll, double specCosOnly[], d
   if(*bw==1){
     bs_spectral(wFT, mtt, mtt1, rtt, rtt1, specAll, G11C, G11, G12, T, NFc, ns);
   }
-  /* wFT=simAlpha; */
-  /* printf("%f",*ll); , double rtt[], double rtt1[], double mtt[], double mtt1[] */
  free(rtt);
  free(rtt1);
  free(mtt);
@@ -223,8 +179,60 @@ void ffbs_spectral(double wFT[], double *bw, double *ll, double specCosOnly[], d
  mtt1=NULL;
 }
 
+static const R_CallMethodDef spate_call_methods[] = {
+  {"ffbs_spectral", (DL_FUNC)&ffbs_spectral, 13},
+  {"propagate_spectral", (DL_FUNC)&propagate_spectral, 7},
+  {"real_fft", (DL_FUNC)&real_fft, 7},
+  {"TSreal_fft", (DL_FUNC)&TSreal_fft, 8},
+  {NULL, NULL, 0}
+};
 
+void R_init_spate(DllInfo* info) {
+    R_registerRoutines(info, NULL, spate_call_methods, NULL, NULL);
+    R_useDynamicSymbols(info, TRUE);
+}
 
+// Old code (not used anymore)
+
+/* void fftc(int *n, double wr[], double wc[], int *inverse){ */
+/*   fftw_complex *in, *out; */
+/*   fftw_plan p; */
+/*   int i; */
+/*   in = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * *n * *n); */
+/*   out = (fftw_complex*) fftw_malloc(sizeof(fftw_complex) * *n * *n); */
+/*   for(i=0; i<(*n * *n);i++){ */
+/*     in[i][0]=wr[i]; */
+/*     in[i][1]=wc[i]; */
+/*   } */
+/*   if(*inverse==1){ */
+/*     p = fftw_plan_dft_2d(*n,*n, in, out, FFTW_FORWARD, FFTW_ESTIMATE); */
+/*   } */
+/*   else{ */
+/*     p = fftw_plan_dft_2d(*n,*n, in, out, FFTW_BACKWARD, FFTW_ESTIMATE); */
+/*   } */
+/*   fftw_execute(p); */
+/*   fftw_destroy_plan(p); */
+/*   for(i=0; i<(*n * *n);i++){ */
+/*     wr[i]=out[i][0]; */
+/*     wc[i]=out[i][1]; */
+/*   } */
+/*   fftw_free(in); fftw_free(out); */
+/* } */
+
+/* void kf2x2diagC(double res[], double spec[], double G11[], double G12[], double *tau2, int *T, int *NFc){ */
+/*   int t,j; */
+/*   double rtt,rtt1; */
+/*   for(j=1; j<=*NFc;j++){ */
+/*     rtt=spec[j-1]; */
+/*     rtt1=0; */
+/*     for(t=1; t<=*T;t++){ */
+/*       rtt1=rtt*(pow(G11[j-1],2)+pow(G12[j-1],2))+spec[j-1]; */
+/*       res[(j-1)* *T + t-1]=rtt1; */
+/*       rtt=rtt1*(1-rtt1/(*tau2+rtt1)); */
+/*       /\* Rprintf(&t); *\/ */
+/*     } */
+/*    } */
+/* } */
 
 /* void ffbsspectralC(double rtt1[], double specCosOnly[], double G11C[], double spec[], double G11[], double G12[], double *tau2, int *T, int *NFc, int *ns){ */
 /*   int t,j, NF; */

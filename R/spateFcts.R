@@ -766,11 +766,6 @@ spate.mcmc=function (y, coord = NULL, lengthx = NULL, lengthy = NULL, Sind = NUL
         alphah <- ffbs(y = wh, lp = lp, G = G, Sigma = diag(spec), 
                        H = IPhi, Omega = diag(rep(parh[9], dim(wh)[2])), 
                        lglk = FALSE, BwSp = TRUE)$simAlpha
-        
-        #         print(class(alphah))
-        #         print(dim(alphah))
-        #         print(length(alphah))
-        #         print(dim(IPhi))
         xih = t(IPhi %*% t(alphah))
       }
       if (Prediction) {
@@ -781,10 +776,7 @@ spate.mcmc=function (y, coord = NULL, lengthx = NULL, lengthy = NULL, Sind = NUL
                                                n = n, T = T, inv = FALSE, indFFT = spateFT$indFFT), 
                                    T = T)
           if(Padding) xihPred <- xihPred[, indPad[sPred]] else xihPred <- xihPred[, sPred]
-          # print(class(xihPred))
-          # print(length(xihPred))
           if (!is.null(x)) lpPred <- apply(x, c(2, 3), lin.pred, b = parh[indFECoef, i]) else lpPred <- array(0, c(T, length(sPred)))
-          # print(length(lpPred))
         }
         else {
           xihPred <- xih
@@ -1189,11 +1181,8 @@ ffbs=function (y, lp, G, Sigma, H, Omega, N = dim(y)[2], T = dim(y)[1],
   }
   ret <- list()
   if (BwSp){
-    # print(dim(simAlpha))
     retsimAlpha=simAlpha[-1, ]
-    if(class(retsimAlpha)=="numeric") retsimAlpha=t(matrix(retsimAlpha))
-    #     print(class(retsimAlpha))
-    #     print(dim(retsimAlpha))
+    if(!is.matrix(retsimAlpha)) retsimAlpha=t(matrix(retsimAlpha))
     ret <- c(ret, list(simAlpha = retsimAlpha))
   } 
   
