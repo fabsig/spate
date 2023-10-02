@@ -1,8 +1,8 @@
 citHeader("To cite spate in publications use:")
 
-citEntry(entry = "Article",
+bibentry(entry = "Article",
   title        = "{spate}: An {R} Package for Spatio-Temporal Modeling with a Stochastic Advection-Diffusion Process",
-  author       = personList(as.person("Fabio Sigrist"),
+  author       = c(as.person("Fabio Sigrist"),
                    as.person("Hans R. K\\\"unsch"),
                    as.person("Werner A. Stahel")),
   journal      = "Journal of Statistical Software",
