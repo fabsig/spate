@@ -1,6 +1,6 @@
 citHeader("To cite spate in publications use:")
 
-bibentry(entry = "Article",
+bibentry(bibtype = "Article",
   title        = "{spate}: An {R} Package for Spatio-Temporal Modeling with a Stochastic Advection-Diffusion Process",
   author       = c(as.person("Fabio Sigrist"),
                    as.person("Hans R. K\\\"unsch"),
